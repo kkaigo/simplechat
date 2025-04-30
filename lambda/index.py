@@ -1,4 +1,90 @@
-# lambda/index.py
+# index.py
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+import boto3
+import os
+import json
+import time
+from pyngrok import ngrok
+import uvicorn
+
+# AWS認証情報はColab上で事前に設定しておく
+# os.environ["AWS_ACCESS_KEY_ID"] = "YOUR_ACCESS_KEY"
+# os.environ["AWS_SECRET_ACCESS_KEY"] = "YOUR_SECRET_KEY"
+# os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
+
+# Bedrock runtime クライアントを作成
+bedrock_client = boto3.client("bedrock-runtime")
+MODEL_ID = "us.amazon.nova-pro-v1:0"
+
+# FastAPI アプリケーション
+app = FastAPI()
+
+# リクエストモデル
+class GenerationRequest(BaseModel):
+    prompt: str
+    max_new_tokens: int = 512
+    temperature: float = 0.7
+    top_p: float = 0.9
+
+# レスポンスモデル
+class GenerationResponse(BaseModel):
+    generated_text: str
+    response_time: float
+
+# 推論エンドポイント
+@app.post("/generate", response_model=GenerationResponse)
+async def generate(request: GenerationRequest):
+    try:
+        start_time = time.time()
+
+        payload = {
+            "inputText": request.prompt,
+            "textGenerationConfig": {
+                "maxTokenCount": request.max_new_tokens,
+                "temperature": request.temperature,
+                "topP": request.top_p,
+                "stopSequences": [],
+                "presencePenalty": 0.0,
+                "frequencyPenalty": 0.0
+            }
+        }
+
+        response = bedrock_client.invoke_model(
+            modelId=MODEL_ID,
+            body=json.dumps(payload),
+            contentType="application/json",
+            accept="application/json"
+        )
+
+        response_body = json.loads(response['body'].read())
+        generated_text = response_body['results'][0]['outputText']
+
+        return GenerationResponse(
+            generated_text=generated_text,
+            response_time=round(time.time() - start_time, 3)
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    port = 8501
+    print(f"ポート{port}に新しいngrokトンネルを開いています...")
+    ngrok_tunnel = ngrok.connect(port)
+    public_url = ngrok_tunnel.public_url
+    print("---------------------------------------------------------------------")
+    print(f"✅ 公開URL:   {public_url}")
+    print(f"📖 APIドキュメント (Swagger UI): {public_url}/docs")
+    print("---------------------------------------------------------------------")
+    print("(APIクライアントやブラウザからアクセスするためにこのURLをコピーしてください)")
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+
+
+
+
+'''
 import json
 import os
 import boto3
@@ -18,7 +104,8 @@ def extract_region_from_arn(arn):
 bedrock_client = None
 
 # モデルID
-MODEL_ID = os.environ.get("MODEL_ID", "us.amazon.nova-lite-v1:0")
+# MODEL_ID = os.environ.get("MODEL_ID", "us.amazon.nova-lite-v1:0")
+MODEL_ID = os.environ.get("MODEL_ID", "us.amazon.nova-pro-v1:0")
 
 def lambda_handler(event, context):
     try:
@@ -69,6 +156,7 @@ def lambda_handler(event, context):
                     "content": [{"text": msg["content"]}]
                 })
         
+        
         # invoke_model用のリクエストペイロード
         request_payload = {
             "messages": bedrock_messages,
@@ -79,6 +167,21 @@ def lambda_handler(event, context):
                 "topP": 0.9
             }
         }
+        
+
+        # Nova Pro用のペイロード形式に変更
+        request_payload = {
+            "inputText": message,
+            "textGenerationConfig": {
+                "maxTokenCount": 512,
+                "stopSequences": [],
+                "temperature": 0.7,
+                "topP": 0.9,
+                "presencePenalty": 0.0,
+                "frequencyPenalty": 0.0
+            }
+        }
+
         
         print("Calling Bedrock invoke_model API with payload:", json.dumps(request_payload))
         
@@ -98,8 +201,10 @@ def lambda_handler(event, context):
             raise Exception("No response content from the model")
         
         # アシスタントの応答を取得
-        assistant_response = response_body['output']['message']['content'][0]['text']
-        
+        # assistant_response = response_body['output']['message']['content'][0]['text']
+        assistant_response = response_body['results'][0]['outputText']
+
+
         # アシスタントの応答を会話履歴に追加
         messages.append({
             "role": "assistant",
@@ -138,3 +243,4 @@ def lambda_handler(event, context):
                 "error": str(error)
             })
         }
+'''
